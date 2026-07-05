@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 from key_manager import get_key_for_store
+from observability import log_decision, log_tool_call
 
 load_dotenv()
 
@@ -25,6 +26,7 @@ def _client(store_id: str) -> httpx.Client:
 
 
 @mcp.tool()
+@log_tool_call
 def check_stock_status(store_id: str, sku: str, fields: list[str] | None = None) -> dict:
     """Check on-hand stock and/or projected hours of stock left for a SKU at a store.
 
@@ -52,25 +54,54 @@ def check_stock_status(store_id: str, sku: str, fields: list[str] | None = None)
             result["hourly_sales_rate"] = hourly_rate
             result["hours_of_stock_left"] = (on_hand / hourly_rate) if hourly_rate > 0 else None
 
+    if "hours_of_stock_left" in result:
+        if result["hours_of_stock_left"] is None:
+            log_decision(
+                f"Checked SKU {sku} at store {store_id}: {on_hand} units on hand, "
+                f"no sales in the last {POS_LOOKBACK_HOURS}h so depletion time can't be estimated."
+            )
+        else:
+            log_decision(
+                f"Checked SKU {sku} at store {store_id}: {on_hand} units on hand, "
+                f"selling ~{result['hourly_sales_rate']:.1f} units/hr over the last {POS_LOOKBACK_HOURS}h "
+                f"=> about {result['hours_of_stock_left']:.1f} hours of stock left."
+            )
+    else:
+        log_decision(f"Checked on-hand stock for SKU {sku} at store {store_id}: {on_hand} units.")
+
     return result
 
 
 @mcp.tool()
+@log_tool_call
 def raise_replenishment(store_id: str, sku: str, quantity: int) -> dict:
     """Raise a replenishment order for a SKU at a store."""
     with _client(store_id) as client:
         resp = client.post(f"/stores/{store_id}/replenishment", json={"sku": sku, "quantity": quantity})
         resp.raise_for_status()
-        return resp.json()
+        order = resp.json()
+
+    log_decision(
+        f"Raised replenishment for {quantity} units of SKU {sku} at store {store_id} "
+        f"(order {order.get('order_id', '?')})."
+    )
+    return order
 
 
 @mcp.tool()
+@log_tool_call
 def get_replenishment_status(store_id: str, order_id: str) -> dict:
     """Get the status of a previously raised replenishment order."""
     with _client(store_id) as client:
         resp = client.get(f"/stores/{store_id}/replenishment/{order_id}")
         resp.raise_for_status()
-        return resp.json()
+        status = resp.json()
+
+    log_decision(
+        f"Checked replenishment order {order_id} at store {store_id}: status is "
+        f"{status.get('status', 'unknown')}."
+    )
+    return status
 
 
 if __name__ == "__main__":
