@@ -1,12 +1,11 @@
 import os
 from datetime import datetime, timedelta, timezone
 
-import httpx
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
-from key_manager import get_key_for_store
 from observability import log_decision, log_tool_call
+from storelink_client import StoreLinkClient
 
 load_dotenv()
 
@@ -18,11 +17,8 @@ POS_LOOKBACK_HOURS = 24
 ALL_FIELDS = ("on_hand", "hours_left")
 
 
-def _client(store_id: str) -> httpx.Client:
-    key = get_key_for_store(store_id)
-    if key is None:
-        raise ValueError(f"no StoreLink key configured for store_id={store_id!r}")
-    return httpx.Client(base_url=STORELINK_API_URL, headers={"X-Korral-Store-Key": key})
+def _client(store_id: str) -> StoreLinkClient:
+    return StoreLinkClient(store_id, STORELINK_API_URL)
 
 
 @mcp.tool()
@@ -39,7 +35,6 @@ def check_stock_status(store_id: str, sku: str, fields: list[str] | None = None)
         on_hand = None
         if requested & {"on_hand", "hours_left"}:
             resp = client.get(f"/stores/{store_id}/inventory", params={"sku": sku})
-            resp.raise_for_status()
             on_hand = resp.json()["on_hand"]
             if "on_hand" in requested:
                 result["on_hand"] = on_hand
@@ -47,7 +42,6 @@ def check_stock_status(store_id: str, sku: str, fields: list[str] | None = None)
         if "hours_left" in requested:
             since = (datetime.now(timezone.utc) - timedelta(hours=POS_LOOKBACK_HOURS)).isoformat()
             resp = client.get(f"/stores/{store_id}/pos", params={"sku": sku, "since": since})
-            resp.raise_for_status()
             transactions = resp.json()["transactions"]
             units_sold = sum(t["quantity"] for t in transactions)
             hourly_rate = units_sold / POS_LOOKBACK_HOURS
@@ -78,7 +72,6 @@ def raise_replenishment(store_id: str, sku: str, quantity: int) -> dict:
     """Raise a replenishment order for a SKU at a store."""
     with _client(store_id) as client:
         resp = client.post(f"/stores/{store_id}/replenishment", json={"sku": sku, "quantity": quantity})
-        resp.raise_for_status()
         order = resp.json()
 
     log_decision(
@@ -94,7 +87,6 @@ def get_replenishment_status(store_id: str, order_id: str) -> dict:
     """Get the status of a previously raised replenishment order."""
     with _client(store_id) as client:
         resp = client.get(f"/stores/{store_id}/replenishment/{order_id}")
-        resp.raise_for_status()
         status = resp.json()
 
     log_decision(
