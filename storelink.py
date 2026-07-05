@@ -10,11 +10,12 @@ app = FastAPI(title="StoreLink API (mock)")
 
 NOW = datetime.now(timezone.utc)
 
-STORES = {"store_001", "store_002"}
+STORES = {"store_001", "store_002", "47", "102"}
 
 SKUS = {
     "sku_milk_1l": {"name": "Whole Milk 1L", "category": "dairy", "supplier_id": "sup_dairy"},
     "sku_beans_400g": {"name": "Canned Beans 400g", "category": "grocery", "supplier_id": "sup_canned"},
+    "8847291": {"name": "Madeta Butter 250g", "category": "dairy", "supplier_id": "sup_dairy"},
 }
 
 SUPPLIERS = {
@@ -27,6 +28,10 @@ INVENTORY = {
     ("store_001", "sku_beans_400g"): 150,
     ("store_002", "sku_milk_1l"): 8,
     ("store_002", "sku_beans_400g"): 200,
+    # gap (24h sold - on_hand) = 18 - 15 = 3, under the 6-unit reorder threshold
+    ("47", "8847291"): 15,
+    # gap (24h sold - on_hand) = 20 - 2 = 18, over the 6-unit reorder threshold
+    ("102", "8847291"): 2,
 }
 
 # Fast-moving milk: steady sales over the last 24h. Slow-moving beans: nothing recent.
@@ -41,6 +46,14 @@ POS_TRANSACTIONS = {
         for h in range(0, 24, 2)
     ],
     ("store_002", "sku_beans_400g"): [],
+    ("47", "8847291"): [
+        {"timestamp": NOW - timedelta(hours=h), "quantity": 1}
+        for h in range(0, 18, 1)
+    ],
+    ("102", "8847291"): [
+        {"timestamp": NOW - timedelta(hours=h), "quantity": 1}
+        for h in range(0, 20, 1)
+    ],
 }
 
 REPLENISHMENT_ORDERS: dict[str, dict] = {}
