@@ -25,7 +25,7 @@ python server.py
 
 ## Tools exposed
 
-- **`check_stock_status(store_id, sku, fields=None)`** — on-hand units and/or projected hours of stock left (`fields`: subset of `["on_hand", "hours_left"]`, defaults to both). `hours_of_stock_left` is derived from a trailing-24h POS sales rate; `None` means no recent sales to project from.
+- **`check_stock_status(store_id, sku, fields=None)`** — on-hand units and/or recent sales for a SKU (`fields`: subset of `["on_hand", "hours_of_stock_left"]`, defaults to both; field names match the result keys, and an unknown field is rejected with a clear error rather than silently ignored). Requesting `hours_of_stock_left` returns `units_sold_last_24h`, `hourly_sales_rate`, and `hours_of_stock_left` (all derived from trailing-24h POS). `units_sold_last_24h` is returned explicitly so the "gap between on-hand and last 24h of sales" comparison a buyer makes is a direct subtraction, not something the agent has to reconstruct from the rate. `hours_of_stock_left` is `None` when there are no recent sales to project from.
 - **`raise_replenishment(store_id, sku, quantity)`** — raises a replenishment order, returns `order_id` and status.
 - **`get_replenishment_status(store_id, order_id)`** — looks up the status of a previously raised order.
 

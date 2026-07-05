@@ -11,10 +11,14 @@ load_dotenv()
 
 STORELINK_API_URL = os.environ["STORELINK_API_URL"]
 
-mcp = FastMCP("korral-storelink")
+mcp = FastMCP(
+    "korral-storelink",
+    host=os.environ.get("MCP_HOST", "127.0.0.1"),
+    port=int(os.environ.get("PORT", "8080")),
+)
 
 POS_LOOKBACK_HOURS = 24
-ALL_FIELDS = ("on_hand", "hours_left")
+ALL_FIELDS = ("on_hand", "hours_of_stock_left")
 
 
 def _client(store_id: str) -> StoreLinkClient:
@@ -26,25 +30,33 @@ def _client(store_id: str) -> StoreLinkClient:
 def check_stock_status(store_id: str, sku: str, fields: list[str] | None = None) -> dict:
     """Check on-hand stock and/or projected hours of stock left for a SKU at a store.
 
-    fields: subset of ["on_hand", "hours_left"]. Defaults to both.
+    fields: subset of ["on_hand", "hours_of_stock_left"]. Defaults to both.
+    Requesting "hours_of_stock_left" also returns units_sold_last_24h and
+    hourly_sales_rate, since all three come from the same POS lookup.
     """
     requested = set(fields) if fields else set(ALL_FIELDS)
+    unknown = requested - set(ALL_FIELDS)
+    if unknown:
+        raise ValueError(
+            f"Unknown fields {sorted(unknown)}; valid fields are {list(ALL_FIELDS)}."
+        )
     result: dict = {"store_id": store_id, "sku": sku}
 
     with _client(store_id) as client:
         on_hand = None
-        if requested & {"on_hand", "hours_left"}:
+        if requested & {"on_hand", "hours_of_stock_left"}:
             resp = client.get(f"/stores/{store_id}/inventory", params={"sku": sku})
             on_hand = resp.json()["on_hand"]
             if "on_hand" in requested:
                 result["on_hand"] = on_hand
 
-        if "hours_left" in requested:
+        if "hours_of_stock_left" in requested:
             since = (datetime.now(timezone.utc) - timedelta(hours=POS_LOOKBACK_HOURS)).isoformat()
             resp = client.get(f"/stores/{store_id}/pos", params={"sku": sku, "since": since})
             transactions = resp.json()["transactions"]
             units_sold = sum(t["quantity"] for t in transactions)
             hourly_rate = units_sold / POS_LOOKBACK_HOURS
+            result["units_sold_last_24h"] = units_sold
             result["hourly_sales_rate"] = hourly_rate
             result["hours_of_stock_left"] = (on_hand / hourly_rate) if hourly_rate > 0 else None
 
@@ -97,4 +109,7 @@ def get_replenishment_status(store_id: str, order_id: str) -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    # stdio for local/dev use (Duvo agent runtime spawns this as a subprocess).
+    # streamable-http for the deployed Cloud Run service, reached over Korral's
+    # private network.
+    mcp.run(transport=os.environ.get("MCP_TRANSPORT", "stdio"))

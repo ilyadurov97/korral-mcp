@@ -1,0 +1,15 @@
+.git
+.env
+.env.example
+keys.json
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+test_storelink_client.py
+storelink.py
+README.md
+DEPLOYMENT.md
+.venv/
+venv/
